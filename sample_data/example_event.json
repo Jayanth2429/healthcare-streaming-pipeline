@@ -1,0 +1,12 @@
+{
+  "event_id": "evt_b840de24d133b784930f",
+  "patient_id": "pt_4821",
+  "event_type": "ADT",
+  "facility_id": "facility_03",
+  "event_timestamp": "2026-10-01T14:22:10+00:00",
+  "source_system": "synthetic_ehr",
+  "payload": {
+    "visit_type": "ER",
+    "status": "admitted"
+  }
+}
