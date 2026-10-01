@@ -1,34 +1,37 @@
 # Healthcare Streaming Pipeline
 
-A production-minded streaming data engineering portfolio project built with **Kafka-compatible messaging (Redpanda)**, **PySpark Structured Streaming**, explicit schema validation, event-time deduplication, quarantine handling, and restart-safe checkpointing.
+[![CI](https://github.com/Jayanth2429/healthcare-streaming-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Jayanth2429/healthcare-streaming-pipeline/actions/workflows/ci.yml)
 
-> **Privacy note:** This repository uses only synthetic data and generic architecture patterns. It contains no employer code, proprietary schemas, screenshots, credentials, or real patient information.
+A production-minded streaming data engineering project built with **public deidentified clinical data from the MIMIC-IV Clinical Database Demo**, **Kafka-compatible messaging (Redpanda)**, **PySpark Structured Streaming**, explicit schema validation, event-time deduplication, quarantine handling, and restart-safe checkpointing.
 
-## Why I built this
+## Why this project exists
 
 Getting a streaming job to consume messages is the easy part. Production systems also need to behave correctly when events are duplicated, delayed, malformed, replayed, or processed after a restart.
 
-This project focuses on those reliability concerns rather than just the happy path.
+This project uses historical public clinical records as the source, converts them to a normalized event contract, and replays them in event-time order to exercise those reliability patterns.
+
+> MIMIC-IV Demo is deidentified, open-access data. Raw source files are downloaded from PhysioNet at runtime and are not committed to this repository. See [`DATA_SOURCES.md`](DATA_SOURCES.md) for attribution and license details.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Synthetic Event Generator] --> B[Redpanda / Kafka API]
-    B --> C[PySpark Structured Streaming]
-    C --> D[Explicit Schema Parsing]
-    D --> E{Valid event?}
-    E -- Yes --> F[Watermark + Deduplication]
-    F --> G[Curated Parquet]
-    E -- No --> H[Quarantine JSON]
-    F --> I[Curated Checkpoint]
-    H --> J[Quarantine Checkpoint]
+    A[MIMIC-IV Demo\nadmissions + transfers] --> B[Replay / normalization]
+    B --> C[Redpanda / Kafka API]
+    C --> D[PySpark Structured Streaming]
+    D --> E[Explicit schema parsing]
+    E --> F{Valid event?}
+    F -- Yes --> G[Watermark + deduplication]
+    G --> H[Curated Parquet]
+    F -- No --> I[Quarantine JSON]
+    G --> J[Curated checkpoint]
+    I --> K[Quarantine checkpoint]
 ```
 
 ## What this demonstrates
 
-- Event-driven ingestion with Kafka-compatible messaging
-- Fully synthetic healthcare-style events
+- Real public healthcare data as the pipeline source
+- Historical-event replay through Kafka-compatible messaging
 - Deterministic event identifiers for idempotency
 - PySpark Structured Streaming
 - Explicit schemas and required-field validation
@@ -38,26 +41,43 @@ flowchart LR
 - Independent checkpointing and restart-safe processing
 - Unit tests and GitHub Actions CI
 
+## Public source data
+
+The project uses the open-access **MIMIC-IV Clinical Database Demo v2.2**, a deidentified 100-patient subset published on PhysioNet. The demo contains the same schema structure as MIMIC-IV and excludes free-text clinical notes.
+
+This project currently uses:
+
+- `hosp/admissions.csv.gz`
+- `hosp/transfers.csv.gz`
+
+The source is historical. The project explicitly **replays** those records as a stream; it does not imply that MIMIC data was originally delivered through Kafka.
+
 ## Event contract
 
-Each message is a synthetic normalized healthcare event rather than a real HL7 payload.
+Source rows are normalized into three event categories:
+
+- `ADMISSION`
+- `DISCHARGE`
+- `TRANSFER`
+
+Example shape:
 
 ```json
 {
-  "event_id": "evt_b840de24d133b784930f",
-  "patient_id": "pt_4821",
-  "event_type": "ADT",
-  "facility_id": "facility_03",
-  "event_timestamp": "2026-10-01T14:22:10+00:00",
-  "source_system": "synthetic_ehr",
+  "event_id": "evt_...",
+  "subject_id": "10000032",
+  "hadm_id": "22595853",
+  "event_type": "ADMISSION",
+  "event_timestamp": "2180-05-06T22:23:00",
+  "source_table": "admissions",
+  "source_record_id": "22595853:admit",
+  "care_unit": null,
   "payload": {
-    "visit_type": "ER",
-    "status": "admitted"
+    "admission_type": "URGENT",
+    "admission_location": "TRANSFER FROM HOSPITAL"
   }
 }
 ```
-
-Supported event categories are `ADT`, `ORU`, and `MDM` to mirror common healthcare integration concepts without using proprietary message structures.
 
 ## Repository structure
 
@@ -66,16 +86,16 @@ Supported event categories are `ADT`, `ORU`, and `MDM` to mirror common healthca
 ├── .github/workflows/ci.yml
 ├── docs/
 │   └── architecture.md
-├── sample_data/
-│   └── example_event.json
+├── scripts/
+│   └── download_mimic_demo.py
 ├── src/
-│   ├── __init__.py
 │   ├── event_model.py
-│   ├── generate_events.py
 │   ├── identifiers.py
+│   ├── replay_mimic_events.py
 │   └── spark_stream.py
 ├── tests/
 │   └── test_event_schema.py
+├── DATA_SOURCES.md
 ├── docker-compose.yml
 ├── requirements.txt
 └── README.md
@@ -83,36 +103,40 @@ Supported event categories are `ADT`, `ORU`, and `MDM` to mirror common healthca
 
 ## Quick start
 
-### Prerequisites
-
-- Python 3.11
-- Docker Desktop
-- Java 8, 11, or 17 for PySpark
-
 ### 1. Create a virtual environment
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### 2. Start Redpanda
+### 2. Download the public source tables
+
+```bash
+python scripts/download_mimic_demo.py
+```
+
+### 3. Start Redpanda
 
 ```bash
 docker compose up -d
 ```
 
-### 3. Generate synthetic events
-
-The producer intentionally repeats about 10% of messages by default so the streaming job has duplicates to remove.
+### 4. Replay MIMIC events
 
 ```bash
-python -m src.generate_events --count 100 --duplicate-rate 0.10
+python -m src.replay_mimic_events --max-events 500
 ```
 
-### 4. Run the streaming job
+Optional fault injection can deliberately republish a fraction of real source events so the deduplication path can be observed:
+
+```bash
+python -m src.replay_mimic_events --max-events 500 --duplicate-rate 0.05
+```
+
+### 5. Run the streaming job
 
 ```bash
 spark-submit \
@@ -120,24 +144,12 @@ spark-submit \
   src/spark_stream.py
 ```
 
-Outputs are written locally to:
+Outputs are written locally to `data/curated/`, `data/quarantine/`, and `data/checkpoints/`.
 
-```text
-data/curated/events/
-data/quarantine/events/
-data/checkpoints/
-```
-
-### 5. Run unit tests
+### 6. Run unit tests
 
 ```bash
-pytest -q
-```
-
-### 6. Stop the broker
-
-```bash
-docker compose down
+python -m pytest -q
 ```
 
 ## Reliability patterns
@@ -149,24 +161,10 @@ docker compose down
 | Malformed/invalid records | Quarantine output with raw JSON retained |
 | Job restart | Spark checkpointing |
 | Schema drift / bad contracts | Explicit parsing and validation boundary |
-| Reprocessing | Stable identifiers make idempotent behavior easier to reason about |
+| Reprocessing | Stable identifiers make replay behavior idempotent |
 
-## Design tradeoffs
+## Data ethics and scope
 
-This is intentionally a portfolio-sized reference implementation. Parquet keeps the local setup simple, while a production lakehouse would typically use Delta Lake or Iceberg plus managed orchestration, observability, access controls, and centralized schema management.
+MIMIC-IV Demo is deidentified research data. This repository does not contain employer data, production patient data, proprietary schemas, credentials, or internal business logic. The raw MIMIC files remain outside Git and are governed by the source dataset's license.
 
-More detail is in [`docs/architecture.md`](docs/architecture.md).
-
-## Possible next steps
-
-- Replace the Parquet curated layer with Delta Lake
-- Add a Schema Registry and versioned contracts
-- Add a dead-letter topic for invalid Kafka messages
-- Add OpenTelemetry/Prometheus metrics
-- Add Great Expectations or Deequ-style checks
-- Deploy a managed version with Terraform
-- Add synthetic FHIR-shaped event variants
-
-## About this project
-
-I built this repository as a public demonstration of the streaming and reliability patterns I use when thinking about real-world data engineering systems. The healthcare context is synthetic and generalized by design.
+See [`DATA_SOURCES.md`](DATA_SOURCES.md) for source, license, and citation details.

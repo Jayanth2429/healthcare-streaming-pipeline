@@ -1,26 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
 .venv/
-venv/
-
-# Environment / secrets
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-
-# IDE / OS
+__pycache__/
+.pytest_cache/
+*.pyc
+data/raw/
+data/curated/
+data/quarantine/
+data/checkpoints/
 .DS_Store
-.vscode/
-.idea/
-
-# Local pipeline artifacts
-data/
-output/
-checkpoints/
-logs/
-*.db
-*.duckdb

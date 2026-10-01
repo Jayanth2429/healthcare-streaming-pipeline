@@ -12,28 +12,29 @@ CURATED_PATH = os.getenv("CURATED_PATH", "data/curated/events")
 QUARANTINE_PATH = os.getenv("QUARANTINE_PATH", "data/quarantine/events")
 CHECKPOINT_ROOT = os.getenv("CHECKPOINT_ROOT", "data/checkpoints")
 
-ALLOWED_EVENT_TYPES = ("ADT", "ORU", "MDM")
+ALLOWED_EVENT_TYPES = ("ADMISSION", "DISCHARGE", "TRANSFER")
 
 SCHEMA = StructType(
     [
         StructField("event_id", StringType(), True),
-        StructField("patient_id", StringType(), True),
+        StructField("subject_id", StringType(), True),
+        StructField("hadm_id", StringType(), True),
         StructField("event_type", StringType(), True),
-        StructField("facility_id", StringType(), True),
         StructField("event_timestamp", StringType(), True),
-        StructField("source_system", StringType(), True),
+        StructField("source_table", StringType(), True),
+        StructField("source_record_id", StringType(), True),
+        StructField("care_unit", StringType(), True),
         StructField("payload", MapType(StringType(), StringType()), True),
     ]
 )
 
 
 def is_valid_event(df: DataFrame):
-    """Reusable validation predicate for parsed events."""
     return (
         col("event_id").isNotNull()
-        & col("patient_id").isNotNull()
-        & col("facility_id").isNotNull()
-        & col("source_system").isNotNull()
+        & col("subject_id").isNotNull()
+        & col("source_table").isNotNull()
+        & col("source_record_id").isNotNull()
         & col("event_type").isin(*ALLOWED_EVENT_TYPES)
         & col("event_ts").isNotNull()
     )
@@ -65,7 +66,6 @@ def main() -> None:
 
     parsed = build_stream(spark)
     validation = is_valid_event(parsed)
-
     valid = parsed.filter(validation)
     invalid = parsed.filter(~validation)
 
